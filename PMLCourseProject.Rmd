@@ -1,0 +1,107 @@
+---
+title: "PML Weight Training Analysis"
+author: "Jessica Mullison"
+date: "Sunday, January 25, 2015"
+output:
+  html_document:
+    fig_height: 4
+    fig_width: 3
+    keep_md: yes
+---
+
+## Synopsis
+This machine learning analysis uses a random forest prediction model to determine if a machine monitored weight training exercise was done correctly. The random forest model was potentially sutable because of the large number of sample point in the training data set size & and large number of non-linear variables within the training set that affected the outcome. 
+
+## Setting up environmnet & loading the data 
+Originally the data for this project came from: http://groupware.les.inf.puc-rio.br/har but the training
+& test data were downloaded from the following locations to the project working directory.
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+```{r}
+
+library(caret)
+library(Hmisc)
+library(dplyr)
+library(tidyr)
+library(randomForest)
+
+## Visual ispection of training table revealed both "NA" and "#DIV/0!" strings in NA positions
+tbl <- read.csv("pml-training.csv",header=TRUE,na.strings=c("NA","#DIV/0!"),stringsAsFactors=F)
+test <- read.csv("pml-testing.csv",header=TRUE,na.strings=c("NA","#DIV/0!"),stringsAsFactors=F)
+test["classe"]<-factor(test$classe)  ## converting classe variable to a factor for building the model
+
+tbl2<-tbl[sapply(tbl, is.numeric)]
+## Removed variables with very large numbers of NA's to improve performance & reduce
+sparseData<-c()  
+for (idx in 1:ncol(tbl2))
+  sparseData[idx] <- sum(is.na(tbl2[idx])) > 1000
+nzv<-nearZeroVar(tbl2,saveMetrics=TRUE)
+tbl2<-tbl2[!nzv$nzv & !sparseData]
+tbl2["classe"]<-factor(tbl$classe)
+nCols<-ncol(tbl2)
+tbl2<-tbl2[6:nCols]  ## stripping off index, timestamp, window variables
+
+## Reserving a portion of the dataset to estimate out of bounds error
+set.seed(8883336)
+splitIndexes<- createDataPartition(tbl$classe,p=.9,list=FALSE)
+validationTbl<-tbl2[-splitIndexes,]
+tbl2<-tbl2[splitIndexes,]
+tbl<-NULL ## clearing memory
+nzv<-NULL ## clearing memory
+
+```
+
+This gives a training dataset with `r nrow(tbl2)` rows and `r (ncol(tbl2)-1)` predictor variables.
+
+## Creating machine learning algorithms and predict activity quality from activity monitors
+
+```{r}
+
+modFitLDA<-train(classe ~ .,method="lda",data=tbl2,preProcess="pca",times=5)
+modelRandomForest <- randomForest(classe~.,data=tbl2, mtry=20,ntree=5,importance=TRUE,do.trace = 1,na.action=na.keep,test=Test)
+
+```
+
+For the random forest model the out of bounds error was automatically calculated with cross validation in the code above.  
+
+## Assessing accuracy by running predictions on reserved data
+
+```{r}
+
+## what is the out of bounds LDA error
+validationLDA<-predict(modFitLDA,validationTbl)
+estimatedError<-sum(validationLDA!=validationTbl$classe)/nrow(validationTbl)
+
+## how much of this error is in bounds error?
+set.seed(30)
+
+valdiationLDA2<-predict(modFitLDA,validationTbl)
+inBoundsError<-sum(validationLDA != valdiationLDA2)/length(validationLDA)
+inBoundsError
+
+outBoundsEstimatedError=estimatedError-inBoundsError
+outBoundsEstimatedError
+
+## what is the LDA model's accuracy
+confLDA <- confusionMatrix(validationLDA,validationTbl$classe)
+confLDA$overall
+
+## what is the accuracy of the random forest model?
+valdiationRandomForest<-predict(modelRandomForest,validationTbl)
+confRandomForest <- confusionMatrix(valdiationRandomForest,validationTbl$classe)
+confRandomForest$overall
+
+```
+confLDA
+
+
+## Predicting activity quality using the Random forest model
+
+```{r}
+
+ans<-predict(modelRandomForest,test)
+
+```
+
+Predicted exercise quality is: `r ans`
